@@ -19,6 +19,12 @@ if (notifier.update) {
   notifier.notify();
 }
 
+function requestErrorHandler(e) {
+  console.log('Error\n'.red);
+  console.log(e);
+  console.log(e.stack);
+}
+
 function parseCLIOptions() {
   program
     .version(package.version)
@@ -32,7 +38,10 @@ function parseCLIOptions() {
     .option('-l, --force-login', 'request credentials even if already logged in')
     .option('-p, --preflight', 'preflight pull request without actually submitting')
     .option('--plaintext', 'print success / error messages without ansi codes')
-    .option('-c --list-coders', 'print success / error messages without ansi codes')
+    .option('-c --list-coders', 'show a list of all assignees available in a repo')
+    .option('-s --set-coder', 'set the assignee on an open issue')
+    .option('--login [value]', 'the coder login')
+    .option('--issue [value]', 'the PR id')
     .parse(process.argv);
 }
 
@@ -46,19 +55,18 @@ function getBranchName() {
     .spread(function(name) { return name.trim(); });
 }
 
-function listCoders(repo, owner) {
+function listCoders(repo, owner, creds) {
   var url = [githubApiUrl, owner, repo, 'assignees'].join('/');
-  console.log(url);
-  return getCredentials(false)
-    .then(function(creds) {
-      return makeApiRequest(url, {credentials: creds}, 'GET');
+
+  return makeApiRequest(url, {credentials: creds}, 'get')
+    .spread(function(response) {
+      var c = JSON.parse(response.body);
+      console.log(c);
+      c.forEach(function(coder, index) {
+        console.log((index + ':').green, coder.login);
+      });
     })
-    .then(function(assignees) {
-      console.log(assignees);
-    })
-    .fail(function(e) {
-      console.log(e.stack);
-    });
+    .fail(requestErrorHandler);
 }
 
 function getRemoteServers() {
@@ -129,7 +137,7 @@ function openPullRequest(options) {
       title : options.title
     };
 
-    return makeApiRequest(url, options, 'POST', body)
+    return makeApiRequest(url, options, 'post', body)
     .spread(function(response) {
       var body  = response.body && JSON.parse(response.body),
           state = body.state,
@@ -154,7 +162,31 @@ function openPullRequest(options) {
   }
 }
 
-function makeApiRequest(url, options, method, body) {
+function setCoder(issue, coderLogin, owner, repo, creds) {
+  var url = [githubApiUrl, owner, repo, 'issues', issue].join('/');
+
+  return makeApiRequest(url, {
+      credentials: creds
+    }, 'patch', {
+      assignee: coderLogin
+    })
+    .spread(function(response) {
+      var msg;
+      if (response.statusCode === 404) {
+        msg = 'Issue ' + issue + ' was not found!';
+        console.log(msg.red.inverse);
+        return;
+      }
+      msg = 'PR ' + issue + ' was assigned to ' + coderLogin;
+      console.log(msg.green.inverse);
+    })
+    .fail(function(e) {
+      console.log(e.message.red.inverse);
+    });
+
+}
+
+function makeApiRequest(url, options, fnName, body) {
   var data = {
     headers: {
       'User-Agent': 'Pullr NPM v' + package.version
@@ -168,7 +200,7 @@ function makeApiRequest(url, options, method, body) {
     data.body = JSON.stringify(body);
   }
 
-  return Q.ninvoke(request, method, url, data);
+  return Q.ninvoke(request, fnName, url, data);
 }
 
 function openNewPullRequest(program) {
@@ -223,10 +255,17 @@ function openNewPullRequest(program) {
 }
 
 parseCLIOptions();
+if (program.setCoder && program.issue && program.login) {
+  Q.all([getRemoteServers(), getCredentials(false)])
+    .spread(function(servers, creds) {
+      return setCoder(program.issue, program.login, servers.origin.owner, servers.origin.repo, creds);
+    });
+}
+
 if (program.listCoders) {
-  getRemoteServers()
-    .then(function(servers) {
-      return listCoders(servers.origin.repo, servers.origin.owner);
+  Q.all([getRemoteServers(), getCredentials(false)])
+    .spread(function(servers, creds) {
+      return listCoders(servers.origin.repo, servers.origin.owner, creds);
     });
 }
 
