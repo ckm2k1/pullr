@@ -13,72 +13,28 @@ var notifier = UNotifier({
   packagePath: "../package.json"
 });
 
+var githubApiUrl = 'https://api.github.com/repos';
+
 if (notifier.update) {
   notifier.notify();
 }
 
-program
-  .version(package.version)
-  .option('-n, --new', 'open a new pull request')
-  .option('-t, --title <title>', 'pull request title')
-  .option('-d, --description <description>', 'pull request description')
-  .option('-i, --into <branch>', "target branch, defaults to 'master'")
-  .option('-f, --from <branch>', 'source branch, defaults to current')
-  .option('-I, --into-remote <remote>', "target remote server, defaults to 'origin'")
-  .option('-F, --from-remote <remote>', "source remote server, defaults to 'origin'")
-  .option('-l, --force-login', 'request credentials even if already logged in')
-  .option('-p, --preflight', 'preflight pull request without actually submitting')
-  .option('--plaintext', 'print success / error messages without ansi codes')
-  .parse(process.argv);
-
-Q.all([
-  getCredentials(program.forceLogin),
-  getRemoteServers(),
-  program.title       || getBranchDescription(program.from),
-  program.from        || getBranchName(),
-  program.into        || 'master',
-  program.fromRemote  || 'origin',
-  program.intoRemote  || 'origin'
-])
-.spread(function(
-  credentials, servers, title, from, into, fromRemote, intoRemote) {
-  if(!shouldOpenNewPullRequest() && !program.forceLogin) {
-    program.outputHelp(); throw 'Missing required options.';
-  }
-  else if (program.forceLogin && !shouldOpenNewPullRequest()) {
-    return { loginOnly: true }
-  }
-  if(!servers[fromRemote]) { throw 'Unknown remote ' + fromRemote + '.'; }
-  if(!servers[intoRemote]) { throw 'Unknown remote ' + intoRemote + '.'; }
-
-  return {
-    title       : title,
-    description : program.description,
-    fromBranch  : from,
-    fromRepo    : servers[fromRemote].repo,
-    fromOwner   : servers[fromRemote].owner,
-    intoBranch  : into,
-    intoRepo    : servers[intoRemote].repo,
-    intoOwner   : servers[intoRemote].owner,
-    credentials : credentials,
-    preflight   : program.preflight,
-    plaintext   : program.plaintext
-  }
-})
-.then(openPullRequest)
-.fail(function(error) {
-  var msg = ' Error: ' + error + ' ';
-  if (program.plaintext) {
-    console.log(msg);
-  } else {
-    console.log(msg.inverse.red);
-  };
-  process.exit(1);
-})
-.done(function(msg) {
-  console.log(msg);
-  process.exit(0);
-});
+function parseCLIOptions() {
+  program
+    .version(package.version)
+    .option('-n, --new', 'open a new pull request')
+    .option('-t, --title <title>', 'pull request title')
+    .option('-d, --description <description>', 'pull request description')
+    .option('-i, --into <branch>', "target branch, defaults to 'master'")
+    .option('-f, --from <branch>', 'source branch, defaults to current')
+    .option('-I, --into-remote <remote>', "target remote server, defaults to 'origin'")
+    .option('-F, --from-remote <remote>', "source remote server, defaults to 'origin'")
+    .option('-l, --force-login', 'request credentials even if already logged in')
+    .option('-p, --preflight', 'preflight pull request without actually submitting')
+    .option('--plaintext', 'print success / error messages without ansi codes')
+    .option('-c --list-coders', 'print success / error messages without ansi codes')
+    .parse(process.argv);
+}
 
 function getBranchDescription(branch) {
   return Q.nfcall(exec, 'git log ' + (branch || '') + ' -n 1 --format="%s"')
@@ -90,9 +46,25 @@ function getBranchName() {
     .spread(function(name) { return name.trim(); });
 }
 
+function listCoders(repo, owner) {
+  var url = [githubApiUrl, owner, repo, 'assignees'].join('/');
+  console.log(url);
+  return getCredentials(false)
+    .then(function(creds) {
+      return makeApiRequest(url, {credentials: creds}, 'GET');
+    })
+    .then(function(assignees) {
+      console.log(assignees);
+    })
+    .fail(function(e) {
+      console.log(e.stack);
+    });
+}
+
 function getRemoteServers() {
   return Q.nfcall(exec, 'git remote -v')
     .spread(function(servers) {
+      /*jshint expr:true*/
       var _servers = {};
 
       servers.split('\n').slice(0, -1).forEach(function(server) {
@@ -121,50 +93,43 @@ function getCredentials(forceLogin) {
 }
 
 function openPullRequest(options) {
+  var msg;
   if (options.loginOnly) {
-    var msg = ' Login successful '
+    msg = ' Login successful ';
     if (options.plaintext) {
-      return msg
+      return msg;
     } else{
-      return msg.green.inverse
-    };
+      return msg.green.inverse;
+    }
   }
-  var url = 'https://api.github.com/repos/'
-        + options.intoOwner + '/' + options.intoRepo + '/pulls',
+  var url = [githubApiUrl, options.intoOwner, options.intoRepo, '/pulls'].join('/'),
       repo = options.intoRepo,
       head = options.fromOwner + ':' + options.fromBranch,
       base = options.intoBranch;
 
   if(options.fromRepo !== options.intoRepo) {
-    throw 'From repo (' + options.fromRepo + ')'
-      + ' does not match into repo (' + options.intoRepo + ').';
+    throw 'From repo (' + options.fromRepo + ')' +
+      ' does not match into repo (' + options.intoRepo + ').';
   }
 
   if(options.preflight) {
-    var msg = ('Success: Preflighted a pull request from '
-               + head + ' into ' + base + ' for ' + repo + '.')
+    msg = ('Success: Preflighted a pull request from ' +
+               head + ' into ' + base + ' for ' + repo + '.');
     if (options.plaintext) {
-      return msg
+      return msg;
     } else {
       return msg.inverse.green;
-    };
+    }
 
   } else {
-    return Q.ninvoke(request, 'post', url, {
-      headers : {
-        'User-Agent': 'Pullr NPM v'+package.version
-      },
-      auth : {
-        'username' : options.credentials.email,
-        'password' : options.credentials.password
-      },
-      body : JSON.stringify({
-        head  : head,
-        base  : base,
-        body  : options.description,
-        title : options.title
-      })
-    })
+    var body = {
+      head  : head,
+      base  : base,
+      body  : options.description,
+      title : options.title
+    };
+
+    return makeApiRequest(url, options, 'POST', body)
     .spread(function(response) {
       var body  = response.body && JSON.parse(response.body),
           state = body.state,
@@ -175,11 +140,11 @@ function openPullRequest(options) {
             || body.message);
 
       if (state !== 'open') {
-        throw error === 'base' ? "Remote branch doesn't exist. Did you push?" : error
+        throw error === 'base' ? "Remote branch doesn't exist. Did you push?" : error;
       }
 
-      var msg = (' Success: Opened a pull request from '
-                 + head + ' into ' + base + ' for ' + repo + '.');
+      var msg = (' Success: Opened a pull request from ' +
+                 head + ' into ' + base + ' for ' + repo + '.');
 
       return (options.plaintext ?
               msg :
@@ -187,4 +152,84 @@ function openPullRequest(options) {
             ) + "\n " + body.html_url;
     });
   }
+}
+
+function makeApiRequest(url, options, method, body) {
+  var data = {
+    headers: {
+      'User-Agent': 'Pullr NPM v' + package.version
+    },
+    auth: {
+      'username': options.credentials.email,
+      'password': options.credentials.password
+    }
+  };
+  if (body) {
+    data.body = JSON.stringify(body);
+  }
+
+  return Q.ninvoke(request, method, url, data);
+}
+
+function openNewPullRequest(program) {
+  Q.all([
+    getCredentials(program.forceLogin),
+    getRemoteServers(),
+    program.title       || getBranchDescription(program.from),
+    program.from        || getBranchName(),
+    program.into        || 'master',
+    program.fromRemote  || 'origin',
+    program.intoRemote  || 'origin'
+  ])
+  .spread(function(
+    credentials, servers, title, from, into, fromRemote, intoRemote) {
+    if(!shouldOpenNewPullRequest() && !program.forceLogin) {
+      program.outputHelp(); throw 'Missing required options.';
+    }
+    else if (program.forceLogin && !shouldOpenNewPullRequest()) {
+      return { loginOnly: true };
+    }
+    if(!servers[fromRemote]) { throw 'Unknown remote ' + fromRemote + '.'; }
+    if(!servers[intoRemote]) { throw 'Unknown remote ' + intoRemote + '.'; }
+
+    return {
+      title       : title,
+      description : program.description,
+      fromBranch  : from,
+      fromRepo    : servers[fromRemote].repo,
+      fromOwner   : servers[fromRemote].owner,
+      intoBranch  : into,
+      intoRepo    : servers[intoRemote].repo,
+      intoOwner   : servers[intoRemote].owner,
+      credentials : credentials,
+      preflight   : program.preflight,
+      plaintext   : program.plaintext
+    };
+  })
+  .then(openPullRequest)
+  .fail(function(error) {
+    var msg = ' Error: ' + error + ' ';
+    if (program.plaintext) {
+      console.log(msg);
+    } else {
+      console.log(msg.inverse.red);
+    }
+    process.exit(1);
+  })
+  .done(function(msg) {
+    console.log(msg);
+    process.exit(0);
+  });
+}
+
+parseCLIOptions();
+if (program.listCoders) {
+  getRemoteServers()
+    .then(function(servers) {
+      return listCoders(servers.origin.repo, servers.origin.owner);
+    });
+}
+
+if (program.new) {
+  return openNewPullRequest(program);
 }
