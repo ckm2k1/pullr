@@ -42,6 +42,7 @@ function parseCLIOptions() {
     .option('-s --set-coder', 'set the assignee on an open issue')
     .option('--login [value]', 'the coder login')
     .option('--issue [value]', 'the PR id')
+    .option('--debug', 'verbose debugging info')
     .parse(process.argv);
 }
 
@@ -55,13 +56,13 @@ function getBranchName() {
     .spread(function(name) { return name.trim(); });
 }
 
-function listCoders(repo, owner, creds) {
+function listCoders(owner, repo, creds) {
   var url = [githubApiUrl, owner, repo, 'assignees'].join('/');
 
   return makeApiRequest(url, {credentials: creds}, 'get')
     .spread(function(response) {
       var c = JSON.parse(response.body);
-      console.log(c);
+      if (program.debug) console.log(response.headers);
       c.forEach(function(coder, index) {
         console.log((index + ':').green, coder.login);
       });
@@ -101,6 +102,8 @@ function getCredentials(forceLogin) {
 }
 
 function openPullRequest(options) {
+  if (program.debug) console.log('openNewPullRequest options', options);
+
   var msg;
   if (options.loginOnly) {
     msg = ' Login successful ';
@@ -110,10 +113,12 @@ function openPullRequest(options) {
       return msg.green.inverse;
     }
   }
-  var url = [githubApiUrl, options.intoOwner, options.intoRepo, '/pulls'].join('/'),
+  var url = [githubApiUrl, options.intoOwner, options.intoRepo, 'pulls'].join('/'),
       repo = options.intoRepo,
       head = options.fromOwner + ':' + options.fromBranch,
       base = options.intoBranch;
+
+  if (program.debug) console.log('Sending pull request to url:', url);
 
   if(options.fromRepo !== options.intoRepo) {
     throw 'From repo (' + options.fromRepo + ')' +
@@ -240,6 +245,7 @@ function openNewPullRequest(program) {
   })
   .then(openPullRequest)
   .fail(function(error) {
+    console.log(error);
     var msg = ' Error: ' + error + ' ';
     if (program.plaintext) {
       console.log(msg);
@@ -255,6 +261,10 @@ function openNewPullRequest(program) {
 }
 
 parseCLIOptions();
+if (program.new) {
+  return openNewPullRequest(program);
+}
+
 if (program.setCoder && program.issue && program.login) {
   Q.all([getRemoteServers(), getCredentials(false)])
     .spread(function(servers, creds) {
@@ -265,10 +275,6 @@ if (program.setCoder && program.issue && program.login) {
 if (program.listCoders) {
   Q.all([getRemoteServers(), getCredentials(false)])
     .spread(function(servers, creds) {
-      return listCoders(servers.origin.repo, servers.origin.owner, creds);
+      return listCoders(servers.origin.owner, servers.origin.repo, creds);
     });
-}
-
-if (program.new) {
-  return openNewPullRequest(program);
 }
