@@ -7,7 +7,8 @@ var Q           = require('q'),
     program     = require('commander'),
     package     = require('../package.json'),
     credentials = require('../lib/credentials'),
-    UNotifier   = require('update-notifier');
+    UNotifier   = require('update-notifier'),
+    child_process = require('child_process');
 
 var notifier = UNotifier({
   packagePath: "../package.json"
@@ -43,6 +44,7 @@ function parseCLIOptions() {
     .option('--login [value]', 'the coder login')
     .option('--issue [value]', 'the PR id')
     .option('--debug', 'verbose debugging info')
+    .option('--open-pr', 'Opens the PR in your default browser')
     .parse(process.argv);
 }
 
@@ -159,10 +161,12 @@ function openPullRequest(options) {
       var msg = (' Success: Opened a pull request from ' +
                  head + ' into ' + base + ' for ' + repo + '.');
 
-      return (options.plaintext ?
-              msg :
-              msg.inverse.green
-            ) + "\n " + body.html_url;
+      var result = {
+        msg: msg,
+        url: body.html_url
+      };
+      if (!options.plaintext) result.msg = msg.inverse.green + "\n " + body.html_url;
+      return result;
     });
   }
 }
@@ -254,8 +258,9 @@ function openNewPullRequest(program) {
     }
     process.exit(1);
   })
-  .done(function(msg) {
-    console.log(msg);
+  .done(function(result) {
+    if (program.openPr) child_process.exec('open ' + result.url);
+    console.log(result.msg);
     process.exit(0);
   });
 }
