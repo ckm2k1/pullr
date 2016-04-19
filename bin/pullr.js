@@ -14,7 +14,7 @@ var notifier = UNotifier({
   packagePath: "../package.json"
 });
 
-var githubApiUrl = 'https://api.github.com/repos';
+var githubApiUrl = 'https://github.intel.com/repos';
 
 if (notifier.update) {
   notifier.notify();
