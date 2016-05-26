@@ -14,7 +14,7 @@ var notifier = UNotifier({
   packagePath: "../package.json"
 });
 
-var githubApiUrl = 'https://github.intel.com/repos';
+var githubApiUrl = 'https://github.intel.com/api/v3/repos';
 
 if (notifier.update) {
   notifier.notify();
@@ -249,8 +249,8 @@ function openNewPullRequest(program) {
   })
   .then(openPullRequest)
   .fail(function(error) {
-    console.log(error);
-    var msg = ' Error: ' + error + ' ';
+    console.log(error.stack);
+    var msg = error + ' ';
     if (program.plaintext) {
       console.log(msg);
     } else {
@@ -260,7 +260,7 @@ function openNewPullRequest(program) {
   })
   .done(function(result) {
     if (program.openPr) child_process.exec('open ' + result.url);
-    console.log(result.msg);
+    console.log(result.msg || result);
     process.exit(0);
   });
 }
