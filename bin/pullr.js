@@ -181,12 +181,22 @@ function setCoder(issue, coderLogin, owner, repo, creds) {
     })
     .spread(function(response) {
       var msg;
+      console.log(response.statusCode);
       if (response.statusCode === 404) {
         msg = 'Issue ' + issue + ' was not found!';
         console.log(msg.red.inverse);
         return;
       }
-      msg = 'PR ' + issue + ' was assigned to ' + coderLogin;
+      if (response.statusCode !== 200) {
+        var body = JSON.parse(response.body);
+        msg = body.message;
+        var errors = body.errors;
+        console.log(msg.red.inverse);
+        console.log(errors);
+        return;
+      } else {
+        msg = 'PR ' + issue + ' was assigned to ' + coderLogin;
+      }
       console.log(msg.green.inverse);
     })
     .fail(function(e) {
