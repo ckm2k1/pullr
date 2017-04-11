@@ -14,7 +14,7 @@ var notifier = UNotifier({
   packagePath: "../package.json"
 });
 
-var githubApiUrl = 'https://github.intel.com/api/v3/repos';
+var githubApiUrl = 'https://github-lvs.corpzone.internalzone.com/api/v3/repos';
 
 if (notifier.update) {
   notifier.notify();
@@ -207,6 +207,7 @@ function setCoder(issue, coderLogin, owner, repo, creds) {
 
 function makeApiRequest(url, options, fnName, body) {
   var data = {
+    rejectUnauthorized: false,
     headers: {
       'User-Agent': 'Pullr NPM v' + package.version
     },
